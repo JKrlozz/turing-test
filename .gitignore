@@ -1,0 +1,5 @@
+node_modules/
+.env
+data/sesiones/*.json
+npm-debug.log*
+desktop.ini
