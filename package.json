@@ -5,6 +5,7 @@
   "description": "Experimento local tipo Test de Turing para dos laptops.",
   "main": "server.js",
   "scripts": {
+    "test": "node --test",
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
@@ -15,5 +16,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
   }
 }

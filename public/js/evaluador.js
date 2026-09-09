@@ -1,220 +1,197 @@
 (function () {
   const h = React.createElement;
-  const INSTRUCTIONS = 'En este experimento verás dos chats, A y B. Haz las preguntas en orden y espera a que aparezcan las dos respuestas antes de continuar. Al terminar, decide cuál chat crees que respondió una persona real y escribe brevemente por qué. No compartas información personal durante la prueba.';
-  const savedSessionKey = 'turing-evaluator-session';
-  let socket;
+  const PRIVACY = 'Para esta prueba usamos OpenAI y Cartesia para generar las respuestas y la voz. Evita compartir datos personales y, si necesitas hablar de alguien, usa un nombre inventado.';
 
-  function Connection({ online, operatorConnected }) {
-    return h('div', { className: 'connection' },
-      h('span', { className: `connection-dot ${online ? 'online' : ''}` }),
-      online ? (operatorConnected ? 'Operador conectado' : 'Esperando al operador') : 'Reconectando…'
-    );
-  }
-
-  function Topbar({ online, operatorConnected }) {
-    return h('header', { className: 'topbar' },
-      h('div', { className: 'brand' }, h('img', { className: 'school-logo', src: '/logo-itsm', alt: 'Logo ITSM' }), h('div', { className: 'brand-name' }, 'Turing / aula')),
-      h(Connection, { online, operatorConnected })
-    );
-  }
-
-  function Writing() {
-    return h('div', { className: 'writing' }, 'escribiendo', h('span', { className: 'dots' }, h('span'), h('span'), h('span')));
-  }
-
-  function ChatCard({ label, text, waiting }) {
-    return h('article', { className: 'card chat-card' },
-      h('div', { className: 'chat-head' }, h('div', { className: 'chat-label' }, label), waiting && !text ? h('span', { className: 'muted' }, '…') : h('span', { className: 'muted' }, 'listo')),
-      h('div', { className: 'chat-body' }, text ? h('div', { className: 'response' }, text) : waiting ? h(Writing) : h('span', { className: 'muted' }, 'La respuesta aparecerá aquí'))
-    );
-  }
-
-  function Intro({ state, online, onStart }) {
-    const [visible, setVisible] = React.useState(false);
+  function AudioReply({ url, label, chatName, autoPlay }) {
+    const audio = React.useRef(null);
+    const [failed, setFailed] = React.useState(false);
     const [playing, setPlaying] = React.useState(false);
-    const [done, setDone] = React.useState(false);
-    const utteranceRef = React.useRef(null);
-
-    const playInstructions = () => {
-      setVisible(true);
-      setDone(false);
-      setPlaying(true);
-      if (!window.speechSynthesis) {
-        setTimeout(() => { setPlaying(false); setDone(true); }, 9000);
-        return;
+    const [loading, setLoading] = React.useState(false);
+    const [autoplayBlocked, setAutoplayBlocked] = React.useState(false);
+    React.useEffect(() => {
+      if (!autoPlay) return;
+      const player = audio.current;
+      let cancelled = false;
+      document.querySelectorAll('audio').forEach((other) => { if (other !== player) other.pause(); });
+      setLoading(true);
+      player.play().catch((error) => {
+        if (cancelled) return;
+        if (error.name === 'NotAllowedError') setAutoplayBlocked(true);
+        else setFailed(true);
+      }).finally(() => { if (!cancelled) setLoading(false); });
+      return () => { cancelled = true; player.pause(); };
+    }, [url, autoPlay]);
+    async function toggle() {
+      const player = audio.current;
+      if (!player.paused) return player.pause();
+      document.querySelectorAll('audio').forEach((other) => { if (other !== player) other.pause(); });
+      setLoading(true);
+      setFailed(false);
+      setAutoplayBlocked(false);
+      try {
+        if (player.error) player.load();
+        await player.play();
+      } catch (_) {
+        setFailed(true);
+      } finally {
+        setLoading(false);
       }
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(INSTRUCTIONS);
-      utterance.lang = 'es-MX';
-      utterance.rate = 0.93;
-      utterance.pitch = 1;
-      utterance.onend = () => { setPlaying(false); setDone(true); };
-      utterance.onerror = () => { setPlaying(false); setDone(true); };
-      utteranceRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
-    };
-
-    React.useEffect(() => () => {
-      if (window.speechSynthesis) window.speechSynthesis.cancel();
-    }, []);
-
-    return h('main', { className: 'content intro-grid' },
-      h('section', { className: 'intro-copy' },
-        h('div', { className: 'eyebrow' }, 'Experimento de conversación'),
-        h('h1', null, '¿Quién está del otro lado?'),
-        h('p', { className: 'lead' }, 'Haz diez preguntas. Lee dos respuestas. Después, confía en tu intuición.'),
-        h('p', { className: 'objective' }, h('strong', null, 'Objetivo de la prueba: '), 'observar si puedes distinguir una conversación respondida por una persona real de otra generada por una IA, basándote únicamente en el estilo y el contenido.'),
-        h('p', { className: 'session-note' }, 'Sesión: ', h('span', { className: 'session-code' }, state.sessionId || 'preparando…')),
-        h('p', { className: 'privacy-note' }, 'Las etiquetas A y B son neutrales durante toda la prueba.')
-      ),
-      h('section', { className: 'card instructions-card' },
-        h('div', { className: 'eyebrow' }, 'Antes de comenzar'),
-        h('h2', null, 'Escucha las instrucciones'),
-        h('p', null, 'Puedes iniciar directamente. Si pulsas Instrucciones, el inicio se pausará hasta que termine el audio. Puedes subir el volumen de la laptop.'),
-        visible && h('div', { className: 'instruction-text', 'aria-live': 'polite' }, INSTRUCTIONS),
-        h('div', { className: 'instruction-status' }, playing ? 'Reproduciendo instrucciones…' : done ? 'Instrucciones terminadas.' : state.operatorReady ? 'El operador confirmó que está listo.' : 'Esperando confirmación del operador.'),
-        h('div', { className: 'button-row' },
-          h('button', { className: 'button secondary', onClick: playInstructions, disabled: playing }, playing ? 'Reproduciendo…' : 'Instrucciones'),
-          h('button', { className: 'button coral', onClick: onStart, disabled: playing || !online || !state.operatorReady }, 'Iniciar experimento')
-        ),
-      )
+    }
+    return h('div', { className: 'audio-reply' },
+      h('span', { className: 'message-meta' }, chatName),
+      h('audio', { ref: audio, src: url, hidden: true, preload: 'none', onPlay: () => setPlaying(true), onPause: () => setPlaying(false), onEnded: () => setPlaying(false), onError: () => { setFailed(true); setPlaying(false); setLoading(false); } }),
+      h('button', { className: 'button audio-button', type: 'button', onClick: toggle, disabled: loading,
+        'aria-label': `${loading ? 'Cargando' : playing ? 'Pausar' : failed ? 'Reintentar' : 'Reproducir'} ${label}`, title: playing ? 'Pausar audio' : 'Reproducir audio', 'aria-busy': loading },
+        h('svg', { viewBox: '0 0 24 24', width: 24, height: 24, fill: 'currentColor', 'aria-hidden': true },
+          h('path', { d: playing ? 'M6 4h4v16H6zm8 0h4v16h-4z' : 'M7 4v16l14-8z' }))),
+      failed && h('p', { role: 'alert' }, 'No se pudo reproducir. Pulsa el botón para reintentar.'),
+      autoplayBlocked && h('p', { role: 'status' }, 'Pulsa el botón para escuchar; el navegador bloqueó la reproducción automática.')
     );
   }
 
-  function Experiment({ state, response, waiting, onNext }) {
-    const answered = state.answers.length;
-    return h('main', { className: 'content' },
-      h('div', { className: 'experiment-head' },
-        h('div', null, h('div', { className: 'eyebrow' }, 'Ronda en curso'), h('h2', null, `Pregunta ${state.questionIndex + 1} de ${state.totalQuestions}`)),
-        h('span', { className: 'muted' }, `${answered} ${answered === 1 ? 'respuesta doble' : 'respuestas dobles'}`)
-      ),
-      h('section', { className: 'question-panel' }, h('div', { className: 'eyebrow' }, 'Pregunta para ambos chats'), h('h2', null, state.question)),
-      h('div', { className: 'chat-grid' },
-        h(ChatCard, { label: 'Chat A', text: response && response.sideA, waiting }),
-        h(ChatCard, { label: 'Chat B', text: response && response.sideB, waiting })
-      ),
-      h('div', { className: 'next-row' }, h('button', { className: 'button', onClick: onNext, disabled: waiting }, state.questionIndex + 1 === state.totalQuestions ? 'Ver resultado' : 'Siguiente pregunta')),
-      state.answers.length > 0 && h('details', { className: 'progress-list' },
-        h('summary', null, 'Ver respuestas anteriores'),
-        state.answers.map((answer) => h('div', { className: 'progress-item', key: answer.index },
-          h('span', null, String(answer.index + 1).padStart(2, '0')),
-          h('div', null, h('strong', null, 'Chat A'), h('p', null, answer.sideA)),
-          h('div', null, h('strong', null, 'Chat B'), h('p', null, answer.sideB))
-        ))
-      )
-    );
-  }
-
-  function FinalScreen({ state, choice, setChoice, justification, setJustification, onSubmit }) {
-    return h('main', { className: 'content' },
-      h('section', { className: 'card final-card' },
-        h('div', { className: 'eyebrow' }, 'Fin de la ronda'),
-        h('h2', null, 'Tu decisión'),
-        h('p', null, '¿Cuál de los dos chats crees que era la persona real? No hay una respuesta correcta: nos interesa tu impresión.'),
-        h('div', { className: 'choice-row' },
-          h('button', { className: `button choice ${choice === 'A' ? 'selected' : ''}`, onClick: () => setChoice('A') }, h('strong', null, 'Chat A'), h('br'), 'era la persona real'),
-          h('button', { className: `button choice ${choice === 'B' ? 'selected' : ''}`, onClick: () => setChoice('B') }, h('strong', null, 'Chat B'), h('br'), 'era la persona real')
-        ),
-        h('label', { className: 'choice-title', htmlFor: 'justification' }, '¿Por qué elegiste esa opción?'),
-        h('textarea', { id: 'justification', value: justification, onChange: (event) => setJustification(event.target.value), rows: 5, placeholder: 'Escribe aquí las señales que notaste…' }),
-        h('div', { className: 'button-row', style: { marginTop: '14px' } }, h('button', { className: 'button coral', onClick: onSubmit, disabled: !choice }, 'Revelar resultado')),
-        h('details', { className: 'progress-list' },
-          h('summary', null, 'Revisar respuestas'),
-          state.answers.map((answer) => h('div', { className: 'progress-item', key: answer.index },
-            h('span', null, String(answer.index + 1).padStart(2, '0')),
-            h('div', null, h('strong', null, 'Chat A'), h('p', null, answer.sideA)),
-            h('div', null, h('strong', null, 'Chat B'), h('p', null, answer.sideB))
-          ))
-        )
-      )
-    );
-  }
-
-  function Reveal({ reveal, state, onNewSession }) {
-    return h('main', { className: 'content' },
-      h('section', { className: 'reveal-banner' },
-        h('div', { className: 'eyebrow' }, 'Revelación'),
-        h('h2', null, `Chat ${reveal.humanSide} era la persona real`),
-        h('p', null, `Chat ${reveal.aiSide} era la IA. Tu elección fue Chat ${reveal.choice}.`),
-        h('p', null, reveal.justification ? `Tu explicación: “${reveal.justification}”` : 'No se añadió una explicación.')
-      ),
-      h('div', { className: 'final-grid' },
-        h('section', { className: 'card final-card' }, h('h3', null, 'La identidad compartida'), h('p', { className: 'muted' }, `${reveal.identity.name}, ${reveal.identity.age} años, de ${reveal.identity.city}. Esta identidad se mostró al operador y se dio a la IA.`)),
-        h('section', { className: 'card question-editor' }, h('h3', null, 'Resumen'), h('p', { className: 'helper' }, `${state.answers.length} preguntas registradas. La sesión se guardó en el servidor.`), h('button', { className: 'button', onClick: onNewSession }, 'Nueva sesión'))
-      )
-    );
+  function TypingIndicator({ online }) {
+    const [writing, setWriting] = React.useState(false);
+    React.useEffect(() => {
+      setWriting(false);
+      if (!online) return;
+      let timer;
+      let visible = false;
+      // Simulate writing and thinking pauses equally for both anonymous chats.
+      function alternate() {
+        visible = !visible;
+        setWriting(visible);
+        timer = setTimeout(alternate, visible ? 2000 + Math.random() * 4000 : 1500 + Math.random() * 3500);
+      }
+      timer = setTimeout(alternate, 1000 + Math.random() * 2500);
+      return () => clearTimeout(timer);
+    }, [online]);
+    return h('div', { className: 'writing typing-indicator', role: 'status', 'aria-label': online && writing ? 'Escribiendo' : 'Esperando respuesta' },
+      h('span', { className: 'dots', 'aria-hidden': true, style: { visibility: online && writing ? 'visible' : 'hidden' } }, h('span'), h('span'), h('span')));
   }
 
   function App() {
-    const [state, setState] = React.useState({ status: 'loading', questions: [], answers: [], online: false, operatorConnected: false });
-    const [response, setResponse] = React.useState(null);
-    const [waiting, setWaiting] = React.useState(true);
-    const [reveal, setReveal] = React.useState(null);
-    const [choice, setChoice] = React.useState(null);
-    const [justification, setJustification] = React.useState('');
+    const [state, setState] = React.useState(null);
+    const [online, setOnline] = React.useState(false);
+    const [busy, setBusy] = React.useState(false);
     const [error, setError] = React.useState('');
-
-    const applyState = (data) => {
-      const currentResponse = (data.answers || []).find((answer) => answer.index === data.questionIndex) || null;
-      setState((old) => ({ ...old, ...data }));
-      setResponse(currentResponse);
-      setWaiting(data.status === 'active' && !currentResponse);
-      setError('');
-    };
+    const [drafts, setDrafts] = React.useState({});
+    const socket = React.useRef(null);
+    const pending = React.useRef(null);
+    const syncing = React.useRef(true);
+    const bottom = React.useRef(null);
 
     React.useEffect(() => {
-      socket = io({ reconnection: true, reconnectionAttempts: Infinity });
-      socket.on('connect', () => {
-        setState((old) => ({ ...old, online: true }));
-        const oldSession = localStorage.getItem(savedSessionKey);
-        if (oldSession) socket.emit('evaluator_join', oldSession);
-        else socket.emit('create_session');
+      const connection = io({ reconnection: true, reconnectionAttempts: Infinity });
+      socket.current = connection;
+      connection.on('connect', () => { syncing.current = true; connection.emit('evaluator_join'); });
+      connection.on('disconnect', () => { syncing.current = true; setOnline(false); });
+      connection.on('connect_error', () => { setOnline(false); setError('Sin conexión. Intentando reconectar; tu borrador se conserva.'); });
+      connection.on('session_state', (data) => {
+        const command = pending.current;
+        const accepted = command && command.accepted(data);
+        if (accepted && command.onAccepted) command.onAccepted();
+        if (accepted || syncing.current || (command && command.sessionId !== data.sessionId)) {
+          pending.current = null;
+          setBusy(false);
+        }
+        const wasSyncing = syncing.current;
+        syncing.current = false;
+        setOnline(true);
+        setState((previous) => {
+          const latest = data.chats[data.chatIndex].turns.at(-1);
+          const previousTurn = previous?.chats[data.chatIndex].turns.find((turn) => turn.id === latest?.id);
+          const newAudio = !wasSyncing && previous?.sessionId === data.sessionId && latest?.audioUrl && previousTurn && !previousTurn.audioUrl;
+          return { ...data, autoPlayTurnId: wasSyncing ? null : newAudio ? latest.id : previous?.autoPlayTurnId };
+        });
       });
-      socket.on('disconnect', () => setState((old) => ({ ...old, online: false })));
-      socket.on('session_ready', (data) => { localStorage.setItem(savedSessionKey, data.sessionId); applyState(data); });
-      socket.on('session_state', applyState);
-      socket.on('session_expired', (data) => {
-        localStorage.removeItem(savedSessionKey);
-        setError(data.message || 'La sesión anterior terminó. Preparando una nueva…');
-        socket.emit('create_session');
+      // Never expose provider details from server errors to the evaluator.
+      connection.on('app_error', () => {
+        pending.current = null;
+        setBusy(false);
+        setError('No se pudo completar la acción. Tu borrador se conserva. Inténtalo de nuevo.');
       });
-      socket.on('connection_state', (data) => setState((old) => ({ ...old, operatorConnected: data.operatorConnected, operatorReady: data.operatorReady })));
-      socket.on('round_started', (data) => {
-        setState((old) => ({ ...old, status: 'active', questionIndex: data.index, totalQuestions: data.totalQuestions, question: data.question }));
-        setResponse(null);
-        setWaiting(true);
-        setError('');
-      });
-      socket.on('human_response_early', (data) => {
-        setResponse(data);
-        setWaiting(true);
-      });
-      socket.on('round_complete', (data) => {
-        setResponse(data);
-        setWaiting(false);
-        setState((old) => ({ ...old, answers: [...old.answers.filter((answer) => answer.index !== data.index), data].sort((a, b) => a.index - b.index) }));
-      });
-      socket.on('experiment_finished', (data) => { applyState({ ...data, status: 'finished' }); setWaiting(false); });
-      socket.on('questions_updated', applyState);
-      socket.on('reveal', (data) => setReveal(data));
-      socket.on('app_error', (data) => setError(data.message || 'Ocurrió un error.'));
-      return () => socket.disconnect();
+      return () => { connection.removeAllListeners(); connection.disconnect(); };
     }, []);
 
-    const start = () => { setError(''); socket.emit('start_experiment'); };
-    const next = () => { setError(''); socket.emit('next_question'); };
-    const submit = () => { setError(''); socket.emit('submit_guess', { choice, justification }); };
-    const newSession = () => { localStorage.removeItem(savedSessionKey); setReveal(null); setChoice(null); setJustification(''); socket.emit('create_session'); };
+    const chat = state && state.chats[state.chatIndex];
+    const turns = chat ? chat.turns : [];
+    const progress = turns.map((turn) => `${turn.id}:${turn.status}:${turn.audioUrl || ''}`).join('|');
+    React.useEffect(() => {
+      if (bottom.current) {
+        const list = bottom.current.parentElement;
+        list.scrollTop = list.scrollHeight;
+      }
+    }, [state && state.sessionId, state && state.chatIndex, progress]);
 
-    let page;
-    if (state.status === 'loading') page = h('main', { className: 'content waiting' }, 'Conectando con el servidor…');
-    else if (reveal) page = h(Reveal, { reveal, state, onNewSession: newSession });
-    else if (state.status === 'intro') page = h(Intro, { state, online: state.online, onStart: start });
-    else if (state.status === 'active') page = h(Experiment, { state, response, waiting, onNext: next });
-    else page = h(FinalScreen, { state, choice, setChoice, justification, setJustification, onSubmit: submit });
+    function command(event, payload, accepted, onAccepted) {
+      if (!online || syncing.current || !socket.current.connected || pending.current || !state) return;
+      pending.current = { sessionId: state.sessionId, accepted, onAccepted };
+      setBusy(true);
+      setError('');
+      socket.current.emit(event, { sessionId: state.sessionId, ...payload });
+    }
 
-    return h('div', { className: 'shell' }, h(Topbar, { online: state.online, operatorConnected: state.operatorConnected }), error && h('div', { className: 'content error', role: 'alert' }, error), page);
+    const disabled = !online || busy;
+    let page = h('main', { className: 'content waiting' }, 'Conectando con la sesión...');
+    if (state) {
+      const key = `${state.sessionId}:${state.chatIndex}`;
+      const text = drafts[key] || '';
+      const complete = turns.filter((turn) => turn.status === 'complete' && turn.audioUrl).length;
+      const canAsk = state.status === 'active' && turns.length < state.limit && turns.every((turn) => turn.status === 'complete' && turn.audioUrl);
+      if (state.status === 'intro') page = h('main', { className: 'content intro-grid' },
+        h('section', { className: 'intro-copy' },
+          h('div', { className: 'eyebrow' }, 'Experimento de conversación'),
+          h('h1', null, '¿Quién está del otro lado?'),
+           h('p', { className: 'lead' }, 'Vas a conversar con una persona y con una inteligencia artificial, sin saber cuál es cuál. Antes de empezar, piensa cinco preguntas que te gustaría hacerles a las dos.'),
+           h('p', { className: 'objective' }, 'Primero hablarás con el Chat A y después con el Chat B. Hazles las mismas preguntas y fíjate en cómo te responden. Cuando termines, tendrás que elegir en cuál de los dos crees que estaba la persona real.'),
+          h('p', { className: 'privacy-note' }, PRIVACY)),
+        h('section', { className: 'card instructions-card' },
+           h('div', { className: 'eyebrow' }, 'Antes de comenzar'), h('h2', null, 'Así funciona la conversación'),
+           h('p', null, 'Escribe tu primera pregunta y espera la respuesta antes de mandar la siguiente. La escucharás en un mensaje de voz que podrás reproducir las veces que quieras. Tienes cinco mensajes para cada chat; cuando termines con el primero, aparecerá un botón para pasar al segundo. Tómate tu tiempo para escuchar y comparar antes de elegir.'),
+          h('p', { className: 'instruction-status', role: 'status' }, !state.configured ? 'Esperando la configuración de la sesión.' : !state.operatorConnected || !state.operatorReady ? 'Esperando a que la sesión esté lista.' : 'Todo listo para comenzar.'),
+          h('button', { className: 'button coral', disabled: disabled || !state.configured || !state.operatorConnected || !state.operatorReady, onClick: () => command('start_experiment', {}, (data) => data.status !== 'intro') }, 'Iniciar experimento')));
+      if (state.status === 'active') page = h('main', { className: 'content conversation' },
+        h('div', { className: 'experiment-head' },
+          h('div', null, h('div', { className: 'eyebrow' }, 'Conversación en curso'), h('h2', null, `Chat ${chat.label}`)),
+           h('span', { className: 'muted', role: 'status' }, state.limit - turns.length === 1 ? 'Te queda 1 mensaje' : `Te quedan ${state.limit - turns.length} mensajes`)),
+        h('section', { className: 'card messenger', 'aria-label': `Conversación Chat ${chat.label}` },
+          h('div', { className: 'message-list' },
+            !turns.length && h('p', { className: 'waiting' }, state.chatIndex === 0 ? 'Escribe tu primera pregunta.' : 'Repite aquí tus cinco preguntas del Chat A.'),
+            turns.map((turn, index) => h('div', { className: 'message-turn', key: turn.id },
+              h('div', { className: 'message question-message' }, h('span', { className: 'message-meta' }, `Tú · Pregunta ${index + 1}`), h('p', null, turn.question)),
+              h('div', { className: 'message reply-message' },
+                turn.status === 'complete' && turn.audioUrl ? h(AudioReply, { key: turn.audioUrl, url: turn.audioUrl, chatName: `Chat ${chat.label}`, autoPlay: state.autoPlayTurnId === turn.id, label: `respuesta ${index + 1} del Chat ${chat.label}` }) :
+                  turn.status === 'error' ? h(React.Fragment, null,
+                    h('p', { role: 'status' }, 'No se pudo preparar la respuesta.'),
+                    h('button', { className: 'button secondary', disabled, onClick: () => command('retry_response', { chatIndex: state.chatIndex, turnId: turn.id }, (data) => data.chats[state.chatIndex].turns.some((item) => item.id === turn.id && item.status !== 'error')) }, 'Reintentar respuesta')) :
+                    h(TypingIndicator, { key: turn.id, online })))),
+            h('div', { ref: bottom })),
+          h('form', { className: 'message-composer', onSubmit: (event) => {
+            event.preventDefault();
+            if (!canAsk || !text.trim()) return;
+            const count = turns.length;
+            command('send_question', { chatIndex: state.chatIndex, expectedTurn: count, text: text.trim() },
+              (data) => data.sessionId === state.sessionId && data.chats[state.chatIndex].turns.length > count,
+              () => setDrafts((old) => old[key] === text ? { ...old, [key]: '' } : old));
+          } },
+          h('label', { htmlFor: 'question-text', className: 'choice-title' }, 'Tu pregunta'),
+           h('input', { id: 'question-text', className: 'question-input', type: 'text', maxLength: 1000, autoComplete: 'off', value: text, disabled: busy || turns.length >= state.limit, onChange: (event) => setDrafts({ ...drafts, [key]: event.target.value }), placeholder: 'Escribe una pregunta...' }),
+          h('div', { className: 'next-row' }, h('button', { className: 'button coral', type: 'submit', disabled: disabled || !canAsk || !text.trim() }, busy ? 'Enviando...' : 'Enviar pregunta')))),
+        complete === state.limit && h('div', { className: 'next-row' }, h('button', { className: 'button', disabled, onClick: () => command('advance_chat', { chatIndex: state.chatIndex }, (data) => data.chatIndex !== state.chatIndex || data.status !== 'active') }, state.chatIndex === 0 ? 'Continuar al Chat B' : 'Elegir Chat A o B')));
+      if (state.status === 'selection') page = h('main', { className: 'content conversation' }, h('section', { className: 'card final-card' },
+        h('div', { className: 'eyebrow' }, 'Tu decisión'), h('h2', null, '¿Cuál chat era una persona?'),
+        h('p', null, 'Selecciona una sola opción para terminar.'),
+        h('div', { className: 'choice-row' }, ['A', 'B'].map((choice) => h('button', { key: choice, className: 'button choice', disabled, onClick: () => command('submit_guess', { choice }, (data) => data.status === 'closed') }, `Chat ${choice}`)))));
+      if (state.status === 'closed') page = h('main', { className: 'content conversation' }, h('section', { className: 'card final-card' },
+         h('div', { className: 'eyebrow' }, 'Sesión finalizada'), h('h2', null, `Chat ${state.humanChat} era la persona real`),
+        h('p', null, 'Tu elección quedó registrada. Gracias por compartir tu impresión.'),
+        h('button', { className: 'button', disabled, onClick: () => command('new_session', {}, (data) => data.sessionId !== state.sessionId) }, 'Nueva sesión')));
+    }
+    return h('div', { className: `shell${state && state.status === 'active' ? ' evaluator-chat-shell' : ''}` },
+      h('header', { className: 'topbar' }, h('div', { className: 'brand' }, h('img', { className: 'school-logo', src: '/logo-itsm', alt: 'Logo ITSM' }), h('div', { className: 'brand-name' }, 'Turing / aula')),
+        h('div', { className: 'connection', role: 'status' }, h('span', { className: `connection-dot ${online ? 'online' : ''}` }), online ? 'Conectado' : 'Reconectando...')),
+      !online && h('div', { className: 'content connection-notice', role: 'status' }, 'Sin conexión o sincronizando. Los envíos están pausados; tu borrador se conserva.'),
+      error && h('div', { className: 'content error', role: 'alert' }, error), page);
   }
-
   ReactDOM.createRoot(document.getElementById('root')).render(h(App));
 })();

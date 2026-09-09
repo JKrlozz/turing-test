@@ -1,51 +1,40 @@
 # Experimento Test de Turing
 
-Aplicación local para realizar un experimento con dos laptops en la misma red WiFi o Ethernet.
+Prueba local con dos conversaciones consecutivas y respuestas de voz, para un evaluador y un operador en la misma red.
 
-## Requisitos
+## Arranque
 
-- Node.js 18 o superior.
-- Una clave de API de OpenAI para la laptop servidor.
-- Ambos equipos conectados a la misma red local.
+Requiere Node.js 20 o superior, acceso a internet y cuentas con saldo/permisos en OpenAI y Cartesia.
 
-## Instalación y arranque
+1. Ejecuta `npm install` si faltan dependencias.
+2. Configura `.env` siguiendo `.env.example`: `OPENAI_API_KEY`, `OPENAI_MODEL`, `CARTESIA_API_KEY`, `CARTESIA_VOICE_ID` y `CARTESIA_MODEL`.
+3. Ejecuta `inciar.bat` en Windows o `npm start`. El BAT abre el operador en el puerto 3000; si cambias `PORT`, abre manualmente la URL correspondiente.
+4. Abre `http://localhost:3000/operador` en el servidor y `http://IP-DEL-SERVIDOR:3000/evaluador` en el otro equipo. Permite Node.js en la red privada del firewall.
 
-1. Instala dependencias:
+El modelo de texto predeterminado es `gpt-4o-mini`. Ambas partes usan `sonic-3` y la voz Joselin, definida en `CARTESIA_VOICE_ID`. El servidor llama a Cartesia mediante `/tts/bytes`, genera MP3 y mantiene las credenciales fuera del navegador. Sin claves configuradas no permite iniciar; no sustituye los proveedores por respuestas falsas.
 
-   ```bash
-   npm install
-   ```
+## Flujo
 
-2. Copia `.env.example` como `.env` y completa `OPENAI_API_KEY`. Puedes cambiar `OPENAI_MODEL` y `OPENAI_MAX_TOKENS` sin editar el código.
+1. El operador configura una identidad ficticia compartida y confirma que esta listo. Ya no configura preguntas.
+2. Antes de comenzar, el evaluador debe pensar cinco preguntas para repetir en ambos chats.
+3. Primero conversa con Chat A y luego con Chat B. Se sortea que chat corresponde al humano en cada nueva sesion.
+4. El evaluador escribe cinco mensajes libres por chat, uno por turno. Solo recibe audio y puede reproducirlo de nuevo mediante el reproductor. No recibe transcripciones de las respuestas.
+5. El humano escribe desde el operador. Ambas fuentes pasan por la misma voz de Cartesia. La IA espera aleatoriamente entre 10 y 20 segundos ANTES de pedir su respuesta a OpenAI; luego se suma el tiempo de generacion de texto y audio.
+6. Las respuestas tienen un maximo de 35 palabras. El servidor rechaza respuestas humanas mas largas y limita tambien las de IA.
+7. Tras el quinto audio aparece el boton para continuar al segundo chat o a la seleccion final. El evaluador elige Chat A o Chat B como persona real y entonces se le indica cual era la persona real, sin estadisticas ni justificacion. La identidad de cada chat permanece oculta hasta registrar la eleccion.
 
-3. Inicia el servidor:
+Los errores de generacion permiten reintentar el mismo turno sin consumir otra pregunta. Recargar/reconectar recupera el estado mientras siga activo el servidor. Cada respuesta muestra el nombre del chat sobre un boton para reproducir o pausar. Las respuestas nuevas intentan reproducirse automaticamente al llegar; si el navegador lo bloquea, aparece un aviso para pulsar el boton. Los audios del historial no se reproducen automaticamente al recargar o reconectar.
 
-   ```bash
-   npm start
-   ```
+Durante la espera, ambos chats muestran un indicador de escritura con pausas aleatorias. Es una animacion simulada, no una transmision de las pulsaciones del operador; se detiene al recibir la respuesta, ante un error o al desconectarse. El operador ve siempre que chat le corresponde y responde desde su propio formulario.
 
-En Windows también puedes ejecutar `inciar.bat`. El archivo instalará las dependencias si faltan, creará `.env` desde `.env.example` si aún no existe, abrirá una ventana para el servidor y lanzará automáticamente la pantalla del operador.
+## Privacidad y limites
 
-4. En la consola aparecerán las URLs de red. En la laptop del evaluador abre `http://localhost:3000/evaluador` o la URL local indicada.
+- Usa solo identidades ficticias y una voz para la que tengas autorizacion. Los textos humanos se envian a Cartesia; las preguntas e identidad del chat IA se envian a OpenAI y sus respuestas a Cartesia.
+- `.env` esta excluido de Git. No publiques claves. Si una clave se comparte en una conversacion o fuera del equipo, conviene revocarla y reemplazarla.
+- Existe una unica sesion compartida, sin autenticacion de participantes. Usa una red de confianza y no expongas el puerto a internet. El evaluador no debe abrir la pantalla del operador; la separacion de pantallas no impide a un usuario tecnico solicitar ese rol.
+- Las conversaciones, audios y eleccion solo se conservan en memoria hasta iniciar otra sesion o reiniciar el servidor. Ya no se generan los registros JSON antiguos ni estadisticas; los archivos historicos existentes no se borran.
+- Las URL de audio son identificadores aleatorios, sin texto ni identidad del interlocutor. Expiran al sustituir la sesion. Quien tenga una de estas URL puede escuchar ese audio mientras la sesion exista.
 
-5. En la segunda laptop abre la misma URL de red, pero con `/operador`, por ejemplo `http://192.168.1.25:3000/operador`.
+## Verificacion
 
-La aplicación usa reconexión automática de Socket.io. Si Windows Firewall pregunta, permite conexiones entrantes para Node.js en la red privada. No expongas el puerto a internet.
-
-## Flujo del experimento
-
-- El evaluador puede iniciar directamente. Si pulsa **Instrucciones**, el botón de inicio se pausa mientras termina la voz local de Web Speech API y la transcripción aparece en pantalla.
-- El operador cambia nombre, edad y ciudad, edita la cantidad de preguntas y pulsa **Confirmar que estoy listo**. El evaluador no puede iniciar antes de esa confirmación.
-- El servidor crea una identidad y sortea qué lado es la IA en cada sesión.
-- La respuesta humana puede aparecer primero de forma aleatoria. La IA mantiene un mínimo de 7 segundos en su modo rápido y, si el operador respondió dentro de esa ventana, agrega una espera aleatoria de 2 a 5 segundos.
-- Al terminar, el evaluador elige A o B, escribe su justificación y puede ajustar la cantidad de preguntas. Si agrega preguntas, la sesión continúa con ellas.
-
-## Registros
-
-Cada sesión se escribe como JSON en `data/sesiones/` con identidad, asignación, preguntas, respuestas de ambos lados, tiempos, elección y justificación. La carpeta se crea automáticamente al iniciar.
-
-## Seguridad y modo de prueba
-
-`.env` nunca se envía al navegador. Si se arranca sin `OPENAI_API_KEY`, la aplicación usa una respuesta local de prueba y lo avisa en la consola; esto permite probar la conexión y la interfaz, pero no debe usarse para resultados reales.
-
-La voz de instrucciones es generada por el navegador y no necesita internet. El resto de la interfaz, React y Socket.io se sirve desde la laptop servidor.
+Ejecuta `npm test`. Las pruebas usan proveedores simulados, sin gasto de API: ambos ordenes, cinco turnos por chat, limites, espera previa, audio, errores/reintentos, reconexion y seleccion unica. No sustituyen una prueba con las credenciales reales y reproduccion en ambos equipos.
